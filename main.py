@@ -8,7 +8,7 @@ app = Flask(__name__)
 @app.route("/")
 def home():
     return jsonify({
-        "message": "Gunicorn + Flask running successfully on GCP"
+        "message": "Flask running successfully on GCP"
     })
 
 @app.route("/health")
