@@ -1,0 +1,43 @@
+name: Deploy Flask App to GCP VM
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.GCP_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+
+          ssh-keyscan -H ${{ secrets.GCP_VM_IP }} >> ~/.ssh/known_hosts
+
+      - name: Deploy to GCP VM
+        run: |
+          ssh ${{ secrets.GCP_VM_USER }}@${{ secrets.GCP_VM_IP }} << 'EOF'
+
+            cd ~/flask-app
+
+            git pull origin main
+
+            source venv/bin/activate
+
+            pip install -r requirements.txt
+
+            pkill gunicorn || true
+
+            nohup gunicorn \
+              --workers 4 \
+              --bind 0.0.0.0:5000 \
+              main:app > gunicorn.log 2>&1 &
+
+          EOF
