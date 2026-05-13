@@ -26,44 +26,54 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # Optional test step
+      # Optional tests
       - name: Run tests
         run: |
           echo "No tests configured"
 
-
-      # Setup SSH
+      # Configure SSH
       - name: Configure SSH
         run: |
           mkdir -p ~/.ssh
 
-          printf "%s" "${{ secrets.GCP_SSH_KEY }}" > ~/.ssh/id_rsa
+          cat <<EOF > ~/.ssh/id_rsa
+          ${{ secrets.GCP_SSH_KEY }}
+          EOF
 
           chmod 600 ~/.ssh/id_rsa
 
           ssh-keyscan -H "${{ secrets.GCP_VM_IP }}" >> ~/.ssh/known_hosts
-      - name: Test SSH
+
+      # Debug SSH key
+      - name: Validate SSH Key
+        run: |
+          file ~/.ssh/id_rsa
+          head -n 1 ~/.ssh/id_rsa
+
+      # Test SSH connection
+      - name: Test SSH Connection
         run: |
           ssh -i ~/.ssh/id_rsa \
             -o StrictHostKeyChecking=no \
             ${{ secrets.GCP_VM_USER }}@${{ secrets.GCP_VM_IP }} \
             "echo SSH SUCCESS"
-            
-      # Deploy to VM
+
+      # Deploy application
       - name: Deploy application
         run: |
-          ssh ${{ secrets.GCP_VM_USER }}@${{ secrets.GCP_VM_IP }} << 'EOF'
+          ssh -i ~/.ssh/id_rsa \
+            -o StrictHostKeyChecking=no \
+            ${{ secrets.GCP_VM_USER }}@${{ secrets.GCP_VM_IP }} << 'EOF'
 
             set -e
 
             echo "Deploy started..."
 
-            # Create app directory if missing
             mkdir -p ~/flask-app
 
             cd ~/flask-app
 
-            # Clone repo first time if needed
+            # Clone repo if first deployment
             if [ ! -d ".git" ]; then
               git clone https://github.com/${{ github.repository }} .
             fi
@@ -71,7 +81,7 @@ jobs:
             # Pull latest code
             git pull origin main
 
-            # Create venv if missing
+            # Create virtual environment if missing
             if [ ! -d "venv" ]; then
               python3 -m venv venv
             fi
@@ -82,10 +92,10 @@ jobs:
             # Install dependencies
             pip install -r requirements.txt
 
-            # Stop old gunicorn
+            # Stop existing Gunicorn
             pkill gunicorn || true
 
-            # Start new gunicorn
+            # Start Gunicorn
             nohup gunicorn \
               --workers 4 \
               --bind 0.0.0.0:5000 \
