@@ -1,19 +1,33 @@
 # app.py
-from flask import Flask
+
+from flask import Flask, jsonify
+import os
 
 app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return "Hello, Flask!"
+    return jsonify({
+        "message": "Gunicorn + Flask running successfully on GCP"
+    })
 
-@app.route("/about")
-def about():
-    return "This is a simple Flask app."
+@app.route("/health")
+def health():
+    return jsonify({
+        "status": "healthy"
+    })
+
+@app.route("/hello/<name>")
+def hello(name):
+    return jsonify({
+        "message": f"Hello, {name}!"
+    })
 
 if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+
     app.run(
-        host="0.0.0.0",  # Allow external access
-        port=5000,
-        debug=True       # Enable debug mode
+        host="0.0.0.0",
+        port=port,
+        debug=True
     )
