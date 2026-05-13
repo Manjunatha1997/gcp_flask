@@ -31,6 +31,7 @@ jobs:
         run: |
           echo "No tests configured"
 
+
       # Setup SSH
       - name: Configure SSH
         run: |
