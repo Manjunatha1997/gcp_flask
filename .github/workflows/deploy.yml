@@ -1,106 +1,134 @@
-name: Build and Deploy Flask App
+name: CI/CD - Flask Production Deploy
 
 on:
   push:
     branches:
       - main
 
+concurrency:
+  group: production-deploy
+  cancel-in-progress: true
+
 jobs:
-  build-and-deploy:
+  test-build-deploy:
     runs-on: ubuntu-latest
 
     steps:
-      # Checkout repository
+      # ----------------------------
+      # 1. Checkout
+      # ----------------------------
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Setup Python
+      # ----------------------------
+      # 2. Setup Python
+      # ----------------------------
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      # Install dependencies
+      # ----------------------------
+      # 3. Install dependencies
+      # ----------------------------
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # Optional tests
-      - name: Run tests
+      # ----------------------------
+      # 4. Basic sanity check
+      # ----------------------------
+      - name: Import check
         run: |
-          echo "No tests configured"
+          python -c "import flask; print('Flask OK')"
 
-      # Configure SSH
-      - name: Configure SSH
+      # ----------------------------
+      # 5. Setup SSH (FIXED + SECURE)
+      # ----------------------------
+      - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
 
-          cat <<EOF > ~/.ssh/id_rsa
-          ${{ secrets.GCP_SSH_KEY }}
-          EOF
-
+          echo "${{ secrets.GCP_SSH_KEY }}" | tr -d '\r' > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
 
           ssh-keyscan -H "${{ secrets.GCP_VM_IP }}" >> ~/.ssh/known_hosts
 
-      # Debug SSH key
-      - name: Validate SSH Key
-        run: |
-          file ~/.ssh/id_rsa
-          head -n 1 ~/.ssh/id_rsa
-
-      # Test SSH connection
-      - name: Test SSH Connection
+      # ----------------------------
+      # 6. Test SSH connection
+      # ----------------------------
+      - name: Test SSH
         run: |
           ssh -i ~/.ssh/id_rsa \
-            -o StrictHostKeyChecking=no \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
             ${{ secrets.GCP_VM_USER }}@${{ secrets.GCP_VM_IP }} \
-            "echo SSH SUCCESS"
+            "echo 'SSH OK'"
 
-      # Deploy application
-      - name: Deploy application
+      # ----------------------------
+      # 7. Deploy (idempotent + safe restart)
+      # ----------------------------
+      - name: Deploy to GCP VM
         run: |
           ssh -i ~/.ssh/id_rsa \
-            -o StrictHostKeyChecking=no \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
             ${{ secrets.GCP_VM_USER }}@${{ secrets.GCP_VM_IP }} << 'EOF'
 
-            set -e
+          set -e
 
-            echo "Deploy started..."
+          APP_DIR=~/flask-app
+          REPO_URL="https://github.com/${{ github.repository }}.git"
 
-            mkdir -p ~/flask-app
+          echo "🚀 Starting deployment..."
 
-            cd ~/flask-app
+          # ----------------------------
+          # 1. Setup app directory
+          # ----------------------------
+          if [ ! -d "$APP_DIR/.git" ]; then
+            rm -rf $APP_DIR
+            git clone $REPO_URL $APP_DIR
+          fi
 
-            # Clone repo if first deployment
-            if [ ! -d ".git" ]; then
-              git clone https://github.com/${{ github.repository }} .
-            fi
+          cd $APP_DIR
 
-            # Pull latest code
-            git pull origin main
+          # ----------------------------
+          # 2. Pull latest code
+          # ----------------------------
+          git reset --hard
+          git pull origin main
 
-            # Create virtual environment if missing
-            if [ ! -d "venv" ]; then
-              python3 -m venv venv
-            fi
+          # ----------------------------
+          # 3. Python venv
+          # ----------------------------
+          if [ ! -d "venv" ]; then
+            python3 -m venv venv
+          fi
 
-            # Activate environment
-            source venv/bin/activate
+          source venv/bin/activate
 
-            # Install dependencies
-            pip install -r requirements.txt
+          pip install --upgrade pip
+          pip install -r requirements.txt
 
-            # Stop existing Gunicorn
-            pkill gunicorn || true
+          # ----------------------------
+          # 4. Stop previous app safely
+          # ----------------------------
+          pkill -f gunicorn || true
 
-            # Start Gunicorn
-            nohup gunicorn \
-              --workers 4 \
-              --bind 0.0.0.0:5000 \
-              main:app > gunicorn.log 2>&1 &
+          sleep 2
 
-            echo "Deployment completed"
+          # ----------------------------
+          # 5. Start Gunicorn (production-ready)
+          # ----------------------------
+          nohup gunicorn \
+            --workers 3 \
+            --threads 2 \
+            --timeout 120 \
+            --bind 0.0.0.0:5000 \
+            main:app \
+            > gunicorn.log 2>&1 &
+
+          echo "✅ Deployment successful"
 
           EOF
