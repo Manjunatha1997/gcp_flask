@@ -15,9 +15,9 @@ jobs:
 
     steps:
       # ----------------------------
-      # 1. Checkout
+      # 1. Checkout code
       # ----------------------------
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       # ----------------------------
@@ -29,22 +29,37 @@ jobs:
           python-version: "3.11"
 
       # ----------------------------
-      # 3. Install dependencies
+      # 3. Cache virtual environment (FASTEST)
       # ----------------------------
-      - name: Install dependencies
+      - name: Cache venv
+        uses: actions/cache@v4
+        with:
+          path: venv
+          key: ${{ runner.os }}-venv-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-venv-
+
+      # ----------------------------
+      # 4. Create venv + install deps (only if needed)
+      # ----------------------------
+      - name: Setup venv & install dependencies
         run: |
-          python -m pip install --upgrade pip
+          python -m venv venv
+          source venv/bin/activate
+
+          pip install --upgrade pip
           pip install -r requirements.txt
 
       # ----------------------------
-      # 4. Basic sanity check
+      # 5. Basic sanity check
       # ----------------------------
       - name: Import check
         run: |
+          source venv/bin/activate
           python -c "import flask; print('Flask OK')"
 
       # ----------------------------
-      # 5. Setup SSH (FIXED + SECURE)
+      # 6. Setup SSH securely
       # ----------------------------
       - name: Setup SSH
         run: |
@@ -56,20 +71,20 @@ jobs:
           ssh-keyscan -H "${{ secrets.GCP_VM_IP }}" >> ~/.ssh/known_hosts
 
       # ----------------------------
-      # 6. Test SSH connection
+      # 7. Test SSH connection
       # ----------------------------
-      - name: Test SSH
+      - name: Test SSH Connection
         run: |
           ssh -i ~/.ssh/id_rsa \
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes \
             ${{ secrets.GCP_VM_USER }}@${{ secrets.GCP_VM_IP }} \
-            "echo 'SSH OK'"
+            "echo 'SSH SUCCESS'"
 
       # ----------------------------
-      # 7. Deploy (idempotent + safe restart)
+      # 8. Deploy to server
       # ----------------------------
-      - name: Deploy to GCP VM
+      - name: Deploy application
         run: |
           ssh -i ~/.ssh/id_rsa \
             -o IdentitiesOnly=yes \
@@ -81,10 +96,10 @@ jobs:
           APP_DIR=~/flask-app
           REPO_URL="https://github.com/${{ github.repository }}.git"
 
-          echo "🚀 Starting deployment..."
+          echo "🚀 Deployment started..."
 
           # ----------------------------
-          # 1. Setup app directory
+          # Clone or update repo
           # ----------------------------
           if [ ! -d "$APP_DIR/.git" ]; then
             rm -rf $APP_DIR
@@ -93,14 +108,11 @@ jobs:
 
           cd $APP_DIR
 
-          # ----------------------------
-          # 2. Pull latest code
-          # ----------------------------
           git reset --hard
           git pull origin main
 
           # ----------------------------
-          # 3. Python venv
+          # Create venv if not exists
           # ----------------------------
           if [ ! -d "venv" ]; then
             python3 -m venv venv
@@ -112,15 +124,11 @@ jobs:
           pip install -r requirements.txt
 
           # ----------------------------
-          # 4. Stop previous app safely
+          # Restart Gunicorn safely
           # ----------------------------
           pkill -f gunicorn || true
-
           sleep 2
 
-          # ----------------------------
-          # 5. Start Gunicorn (production-ready)
-          # ----------------------------
           nohup gunicorn \
             --workers 3 \
             --threads 2 \
