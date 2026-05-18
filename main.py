@@ -23,6 +23,10 @@ def encode_image(image):
     _, buffer = cv2.imencode(".jpg", image)
     return base64.b64encode(buffer).decode("utf-8")
 
+@app.route("/")
+def home():
+    return "Go for /predict with POST method and an image file to get predictions!"
+
 
 @app.route("/predict", methods=["POST"])
 def predict():
