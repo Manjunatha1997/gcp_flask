@@ -8,7 +8,7 @@ import os
 app = Flask(__name__)
 
 # Load YOLO model once
-model = YOLO("yolov8n.pt")  # replace with your custom weights if needed
+#model = YOLO("yolov8n.pt")  # replace with your custom weights if needed
 
 
 def read_image(file):
